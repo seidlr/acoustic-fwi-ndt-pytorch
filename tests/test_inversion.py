@@ -31,7 +31,7 @@ class TestInversion:
             grad_fn="adjoint",
             n_iter=60,
         )
-        assert len(history) == 60
+        assert len(history) == 61  # n_iter pre-step misfits + the final model's misfit
         # misfit reduced by at least one order of magnitude
         assert history[-1] < history[0] / 10.0
 

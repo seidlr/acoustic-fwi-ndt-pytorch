@@ -61,8 +61,6 @@ class SimConfig:
     y_src: float = 65.0
     f0: float = 15000.0  # dominant frequency [Hz]
     scaling: float = 1.0
-    # Source delay [s]; the sentinel 0.0 means "use 1 / f0" (resolved in __post_init__).
-    t0: float = 0.0
     # Global source-amplitude multiplier. The MATLAB amplitude is ~1e-11, giving a
     # wavefield ~1e-24 that underflows float32 (MPS). FWI gradients are invariant to
     # this scale, so float32 runs lift it (see FLOAT32_SOURCE_SCALE). Default 1.0
@@ -82,9 +80,10 @@ class SimConfig:
     # historical kernel image, never for gradient verification or inversion.
     cutoff_timesteps: int = 0
 
-    def __post_init__(self) -> None:
-        if self.t0 == 0.0:
-            self.t0 = 1.0 / self.f0
+    @property
+    def t0(self) -> float:
+        """Source delay [s]; defaults to 1 / f0 (derived so it tracks f0 changes)."""
+        return 1.0 / self.f0
 
     @property
     def dx_m(self) -> float:

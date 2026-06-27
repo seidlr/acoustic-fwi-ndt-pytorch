@@ -8,9 +8,10 @@ Optimizer note (deviation from the plan's LBFGS default): the gradient magnitude
 extreme (~1e-57 in float64 at the native source scale). We normalize the gradient to
 unit max-abs each iteration, so the absolute scale cancels and `lr` is a step in
 alpha2 units (~1e7) - a step of ~1e5 changes the model by ~1e5 per iteration at the
-strongest-gradient cell. Adam is the default (smooths the normalized direction);
-sgd/lbfgs remain selectable. (Raw Adam without normalization fails: its eps=1e-8
-dwarfs a 1e-57 gradient and zeroes the update.)
+strongest-gradient cell. Adam is the default (smooths the normalized direction) and
+sgd is selectable; LBFGS is deliberately not offered (its line search needs the
+gradient scaled with the loss, which the normalization breaks). (Raw Adam without
+normalization also fails: its eps=1e-8 dwarfs a 1e-57 gradient and zeroes the update.)
 """
 
 from __future__ import annotations
@@ -42,17 +43,20 @@ def invert(
     lr: float = 5e4,
     callback: Callable[[int, float, torch.Tensor], None] | None = None,
 ) -> tuple[torch.Tensor, list[float]]:
-    """Run the inversion. Returns (alpha2_hat, misfit_history of length n_iter)."""
+    """Run the inversion. Returns (alpha2_hat, misfit_history of length n_iter + 1:
+    the misfit before each step plus the misfit of the returned model)."""
     alpha2 = alpha2_init.detach().clone().requires_grad_(True)
 
+    # adam (default) and sgd both work on the unit-normalized gradient direction.
+    # LBFGS is intentionally NOT offered: its Wolfe-condition line search needs the
+    # gradient scaled consistently with the loss, but we normalize the gradient to
+    # unit max-abs (the loss is ~1e-51), so LBFGS's step overshoots and diverges.
     if optimizer == "adam":
         opt: torch.optim.Optimizer = torch.optim.Adam([alpha2], lr=lr)
     elif optimizer == "sgd":
         opt = torch.optim.SGD([alpha2], lr=lr)
-    elif optimizer == "lbfgs":
-        opt = torch.optim.LBFGS([alpha2], lr=lr, max_iter=1)
     else:
-        raise ValueError(f"unknown optimizer {optimizer!r}")
+        raise ValueError(f"unknown optimizer {optimizer!r} (use 'adam' or 'sgd')")
 
     def _normalize(g: torch.Tensor) -> torch.Tensor:
         """Unit max-abs so the optimizer step is independent of the tiny grad scale."""
@@ -88,20 +92,9 @@ def invert(
         return Jval
 
     history: list[float] = []
-    last_j: list[float] = [0.0]
-
-    def closure():
-        opt.zero_grad(set_to_none=False)
-        last_j[0] = compute_grad()
-        return torch.tensor(last_j[0])
-
     for it in range(n_iter):
-        if optimizer == "lbfgs":
-            opt.step(closure)  # type: ignore[arg-type]
-            Jval = last_j[0]
-        else:
-            Jval = compute_grad()
-            opt.step()  # type: ignore[call-arg]  # Adam/SGD.step() takes no closure
+        Jval = compute_grad()  # misfit of the model at the start of this iteration
+        opt.step()  # type: ignore[call-arg]  # Adam/SGD.step() takes no closure
         with torch.no_grad():
             alpha2.clamp_(min=0.0)
             if active_mask is not None:
@@ -109,5 +102,10 @@ def invert(
         history.append(Jval)
         if callback is not None:
             callback(it, Jval, alpha2.detach())
+
+    # record the misfit of the FINAL (returned) model, so history[-1] matches alpha2_hat
+    with torch.no_grad():
+        final = forward(alpha2, src_sig, src_i, src_j, rec_i, rec_j, cfg)
+        history.append(float(l2_misfit(final.traces, observed, cfg.dt)))
 
     return alpha2.detach(), history

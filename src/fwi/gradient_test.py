@@ -57,6 +57,10 @@ def clean_slope(
     """
     n = len(r)
     logs = [math.log(h) for h in hs]
+    if any(logs[i + 1] == logs[i] for i in range(n - 1)):
+        raise ValueError(
+            "step sizes hs must be strictly distinct (no duplicate values)"
+        )
     # floor at a tiny positive so exact-zero round-off values stay finite; they
     # become slope outliers and are excluded by the plateau detector below.
     logr = [math.log(max(v, 1e-300)) for v in r]

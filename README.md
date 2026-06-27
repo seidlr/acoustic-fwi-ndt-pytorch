@@ -1,15 +1,14 @@
 # acoustic-fwi-ndt-pytorch
 
-A PyTorch port of **part of my PhD code**: the 2D acoustic full-waveform inversion (FWI)
-I used for non-destructive testing of a plate, reimplemented from the original MATLAB.
-The misfit gradient `dJ/d(alpha2)` is computed **two independent ways** - automatic
-differentiation and a hand-coded **adjoint-state** kernel - which agree to machine
-precision, are verified with a Taylor / hockey-stick plot, and drive a full iterative
-inversion that reconstructs the defect(s).
+A PyTorch port of **part of my PhD code** ([thesis, TU Munich](https://mediatum.ub.tum.de/doc/1391950/1391950.pdf)):
+the 2D acoustic full-waveform inversion (FWI) I used for non-destructive testing of a
+plate, reimplemented from the original MATLAB. The misfit gradient `dJ/d(alpha2)` is
+computed **two independent ways** - automatic differentiation and a hand-coded
+**adjoint-state** kernel - which agree to machine precision, are verified with a Taylor /
+hockey-stick plot, and drive a full iterative inversion that reconstructs the defect(s).
 
-> Scope: this ports the `NonDestructiveTesting/2DCode/PerturbedPlate` example from my PhD
-> MATLAB code - not the whole thesis codebase. Design notes:
-> `docs/plans/2026-06-27-fwi-2d-plate-pytorch-port.md`.
+This ports the `NonDestructiveTesting/2DCode/PerturbedPlate` example - one piece of the
+thesis codebase, not the whole thing.
 
 ## What it does
 

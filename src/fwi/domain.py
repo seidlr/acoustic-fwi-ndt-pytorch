@@ -70,6 +70,8 @@ def read_domain(path: str | Path) -> Domain:
         int(float(next(nums))),
         int(float(next(nums))),
     )
+    if nK != 1:
+        raise ValueError(f"{path}: nK={nK}, but this is a 2D solver (expected nK=1)")
     flat = np.array([int(float(t)) for t in nums], dtype=np.int64)
     expected = nI * nJ * nK
     if flat.size != expected:

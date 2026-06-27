@@ -22,7 +22,9 @@ def _as_1d(value, n: int, name: str) -> list[float] | None:
     if isinstance(value, (int, float)):
         return [float(value)] * n
     seq = [float(v) for v in value]
-    if len(seq) != n and n != 1:
+    if len(seq) == 1:  # a 1-element list broadcasts like a scalar
+        return seq * n
+    if len(seq) != n:
         raise ValueError(f"{name}: length {len(seq)} != n_src {n}")
     return seq
 
