@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "fwi: 2D acoustic full-waveform inversion for NDT in PyTorch"
+abstract: >-
+  A PyTorch port of part of my PhD code: 2D acoustic full-waveform inversion for
+  non-destructive testing, reimplemented from the original MATLAB. Computes the
+  misfit gradient two ways - automatic differentiation and a hand-coded
+  adjoint-state kernel - verified against each other and with a Taylor /
+  hockey-stick gradient test.
+authors:
+  - family-names: Seidl
+    given-names: Robert
+    email: robertseidl425@gmail.com
+keywords:
+  - full-waveform-inversion
+  - adjoint-state method
+  - PyTorch
+  - non-destructive testing
+  - seismology
+license: MIT
+version: 0.1.0
+date-released: 2026-06-27

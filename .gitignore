@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+dist/
+build/
+
+# uv / venv (uv.lock IS committed for reproducible installs)
+.venv/
+
+# Outputs (figures, regenerated seismograms, checkpoints)
+outputs/
+*.npz
+*.pth
+
+# Private PhD MATLAB source (symlink; not part of this repo)
+resources/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

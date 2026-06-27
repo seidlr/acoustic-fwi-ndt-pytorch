@@ -1,0 +1,109 @@
+"""Reusable problem setup shared by examples, notebooks, and tests.
+
+Builds a start model (homogeneous), a true model (with defect(s)), source/receiver
+geometry, and the observed receiver traces (forward-modeled through the true model).
+
+Two grids:
+  - "small": 14x34 SmallDomain2D -> SmallDomain2D_1pt. Cheap; used for the gradient
+    agreement and Taylor tests (CPU float64). Geometry is index-based and centered,
+    since the full-plate source coordinates fall outside this tiny domain.
+  - "full": 104x304 Domain2D_model -> Domain2D_Fichtner_1pt_oben. The real plate;
+    geometry from SimConfig (receiver ring). Autograd here is memory-heavy.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+import torch
+
+from fwi import geometry, wavelet
+from fwi.config import SimConfig, default_source_scale
+from fwi.domain import build_alpha2, read_domain
+from fwi.forward import forward
+
+DATA = Path(__file__).resolve().parents[2] / "data" / "domain"
+
+GRIDS = {
+    "small": ("SmallDomain2D.txt", "SmallDomain2D_1pt.txt"),
+    "full": ("Domain2D_model.txt", "Domain2D_Fichtner_1pt_oben.txt"),
+}
+
+
+@dataclass
+class Problem:
+    cfg: SimConfig
+    start_alpha2: torch.Tensor
+    true_alpha2: torch.Tensor
+    active_mask: torch.Tensor
+    src_sig: torch.Tensor
+    src_i: torch.Tensor
+    src_j: torch.Tensor
+    rec_i: torch.Tensor
+    rec_j: torch.Tensor
+    observed: torch.Tensor  # (n_rec, nt) traces through the true model
+
+
+def _bounds(active: torch.Tensor) -> tuple[int, int, int, int]:
+    rows = torch.where(active.any(dim=1))[0]
+    cols = torch.where(active.any(dim=0))[0]
+    return int(rows.min()), int(rows.max()), int(cols.min()), int(cols.max())
+
+
+def _small_geometry(active: torch.Tensor):
+    """One top-center source and a ring of receivers just inside the active region."""
+    imin, imax, jmin, jmax = _bounds(active)
+    ic = (imin + imax) // 2
+    src_i = torch.tensor([imin + 1])
+    src_j = torch.tensor([(jmin + jmax) // 2])
+    step = max(1, (jmax - jmin) // 6)
+    rec_i, rec_j = [], []
+    for j in range(jmin + 1, jmax, step):  # bottom edge
+        rec_i.append(imax - 1)
+        rec_j.append(j)
+    for i in (ic, imax - 2):  # left + right edges
+        rec_i.append(i)
+        rec_j.append(jmin + 1)
+        rec_i.append(i)
+        rec_j.append(jmax - 1)
+    return src_i, src_j, torch.tensor(rec_i), torch.tensor(rec_j)
+
+
+def build_problem(
+    grid: str = "small",
+    *,
+    device: torch.device | str = "cpu",
+    dtype: torch.dtype = torch.float64,
+    cfg: SimConfig | None = None,
+) -> Problem:
+    start_file, true_file = GRIDS[grid]
+    # Lift the source amplitude for float32 (MPS) so the wavefield does not underflow.
+    cfg = cfg or SimConfig(source_scale=default_source_scale(dtype))
+    dom_start = read_domain(DATA / start_file)
+    dom_true = read_domain(DATA / true_file)
+    start_alpha2, active = build_alpha2(dom_start, device=device, dtype=dtype)
+    true_alpha2, _ = build_alpha2(dom_true, device=device, dtype=dtype)
+
+    if grid == "small":
+        src_i, src_j, rec_i, rec_j = _small_geometry(active)
+    else:
+        src_i, src_j = geometry.make_sources(dom_start, cfg.x_src, cfg.y_src)
+        rec_i, rec_j = geometry.make_receivers(dom_start, cfg)
+
+    sig = wavelet.gaussian_derivative(cfg, device=device, dtype=dtype)
+    with torch.no_grad():
+        observed = forward(true_alpha2, sig, src_i, src_j, rec_i, rec_j, cfg).traces
+
+    return Problem(
+        cfg=cfg,
+        start_alpha2=start_alpha2,
+        true_alpha2=true_alpha2,
+        active_mask=active,
+        src_sig=sig,
+        src_i=src_i,
+        src_j=src_j,
+        rec_i=rec_i,
+        rec_j=rec_j,
+        observed=observed.detach(),
+    )
