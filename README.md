@@ -56,6 +56,7 @@ loop** (`iter k/N | loss (J/J0) | grad_norm`) and plots the loss curve. (If you 
 | `notebooks/01_autodiff_fwi.ipynb` | Forward modeling on the aluminum plate + autodiff gradient | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/01_autodiff_fwi.ipynb) |
 | `notebooks/02_adjoint_fwi_hockey_stick.ipynb` | Adjoint == autodiff, hockey-stick test, single-crack L-BFGS inversion | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/02_adjoint_fwi_hockey_stick.ipynb) |
 | `notebooks/03_frequency_study_and_logo.ipynb` | 50/100/200 kHz frequency study, multi-defect logo, multi-shot (moving-source) acquisition + CPU/GPU benchmark | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/03_frequency_study_and_logo.ipynb) |
+| `notebooks/04_fwi_as_nn_training.ipynb` | FWI as classic PyTorch training: the wave solver as an `nn.Module`, the model as `nn.Parameter`, waveform loss, `LBFGS` + `loss.backward()` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/04_fwi_as_nn_training.ipynb) |
 
 ## Quickstart (uv, local)
 
@@ -119,7 +120,7 @@ Two fidelity points:
 src/fwi/        config, domain, domaingen, geometry, wavelet, forward, misfit, adjoint,
                 gradient_test, inversion, plotting, problems
 examples/       01..06 runnable scripts
-notebooks/      01..03 Colab notebooks
+notebooks/      01..04 Colab notebooks
 data/domain/    plate domain files (homogeneous, cracked, 2/3-crack, logo, small)
 tests/          io, forward physics, gradient agreement + hockey-stick, inversion
 ```
