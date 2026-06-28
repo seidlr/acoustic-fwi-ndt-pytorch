@@ -249,6 +249,9 @@ def build_multishot_batched(
         _, _, rec_i, rec_j = _small_geometry(active)
     else:
         rec_i, rec_j = geometry.make_receivers(dom_start, cfg)
+    # keep the index tensors on the model's device so batched indexing (e.g. mini-batch
+    # shot selection) does not hit a cpu/device mismatch.
+    rec_i, rec_j = rec_i.to(start_alpha2.device), rec_j.to(start_alpha2.device)
 
     sig = wavelet.gaussian_derivative(cfg, device=device, dtype=dtype)[0]  # (nt,)
     n_total = int(rec_i.shape[0])
