@@ -132,3 +132,82 @@ def forward(
     nabla2u = torch.stack(nabla_list, dim=0) if nabla_list is not None else None
     wavefield = torch.stack(field_list, dim=0) if field_list is not None else None
     return ForwardResult(traces=traces, nabla2u=nabla2u, wavefield=wavefield)
+
+
+def _second_derivative_batched(
+    phi: torch.Tensor, h: float, dim: int, order: int
+) -> torch.Tensor:
+    """Central 2nd derivative on the last two spatial dims of a (S, nI, nJ) tensor.
+
+    `dim` matches the 2D `forward` convention: 1 -> X (last dim), 0 -> Y (2nd-last).
+    """
+    coeffs, denom = _STENCILS[order]
+    p = order // 2
+    if dim == 1:  # X: pad the last dim (F.pad pads last dim first)
+        fp = F.pad(phi, [p, p, 0, 0])
+        n = phi.shape[-1]
+        out = sum(
+            (c * fp[..., p + off : p + off + n] for off, c in coeffs), phi.new_zeros(())
+        )
+    else:  # Y: pad the 2nd-last dim
+        fp = F.pad(phi, [0, 0, p, p])
+        n = phi.shape[-2]
+        out = sum(
+            (c * fp[..., p + off : p + off + n, :] for off, c in coeffs),
+            phi.new_zeros(()),
+        )
+    return out / (denom * h * h)
+
+
+def forward_multishot(
+    alpha2: torch.Tensor,
+    src_sig: torch.Tensor,
+    src_i: torch.Tensor,
+    src_j: torch.Tensor,
+    rec_i: torch.Tensor,
+    rec_j: torch.Tensor,
+    cfg: SimConfig,
+) -> torch.Tensor:
+    """Batched forward: S shots (one moving source) solved in ONE (S, nI, nJ) pass.
+
+    All shots share the wavelet `src_sig` (nt,) and the receiver ring `rec_i/rec_j`;
+    shot s injects at `(src_i[s], src_j[s])`. Returns traces `(S, R, nt)`, numerically
+    equal to stacking S single-shot `forward` solves - but it runs one set of stencil
+    kernels per timestep on S x the data, so the GPU's per-launch overhead is amortized
+    across all shots instead of paid S times. Differentiable (for batched FWI).
+
+    Args:
+        alpha2: (nI, nJ) squared-speed model (shared across shots; may require grad).
+        src_sig: (nt,) shared source wavelet.
+        src_i, src_j: (S,) per-shot source grid indices.
+        rec_i, rec_j: (R,) shared receiver grid indices.
+    """
+    device, dtype = alpha2.device, alpha2.dtype
+    dt2 = cfg.dt * cfg.dt
+    src_i = src_i.to(device)
+    src_j = src_j.to(device)
+    rec_i = rec_i.to(device)
+    rec_j = rec_j.to(device)
+    src_sig = src_sig.to(device=device, dtype=dtype).reshape(-1)  # (nt,)
+
+    s_count = int(src_i.shape[0])
+    n_i, n_j = alpha2.shape
+    phi = alpha2.new_zeros((s_count, n_i, n_j))
+    phi_old = alpha2.new_zeros((s_count, n_i, n_j))
+    sidx = torch.arange(s_count, device=device)
+
+    trace_list: list[torch.Tensor] = []
+    for t in range(cfg.nt):
+        d2x = _second_derivative_batched(phi, cfg.dx_m, 1, cfg.order)
+        d2y = _second_derivative_batched(phi, cfg.dy_m, 0, cfg.order)
+        # alpha2 (nI, nJ) broadcasts across the S batch dim
+        phi_new = 2.0 * phi - phi_old + alpha2 * (d2x + d2y) * dt2
+        # inject each shot's source at its own cell (distinct sidx -> no collision)
+        phi_new = phi_new.index_put(
+            (sidx, src_i, src_j), (src_sig[t] * dt2).repeat(s_count), accumulate=True
+        )
+        phi_old = phi
+        phi = phi_new
+        trace_list.append(phi[sidx[:, None], rec_i[None, :], rec_j[None, :]])  # (S, R)
+
+    return torch.stack(trace_list, dim=2)  # (S, R, nt)

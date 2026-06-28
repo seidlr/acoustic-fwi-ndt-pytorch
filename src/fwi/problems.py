@@ -23,7 +23,7 @@ import torch
 from fwi import geometry, wavelet
 from fwi.config import SimConfig
 from fwi.domain import build_alpha2, read_domain
-from fwi.forward import forward
+from fwi.forward import forward, forward_multishot
 
 DATA = Path(__file__).resolve().parents[2] / "data" / "domain"
 
@@ -181,12 +181,16 @@ def build_multishot_problem(
     n_total = int(rec_i.shape[0])
     shots: list[Shot] = []
     for s in _even_indices(n_total, n_shots):
-        keep = [k for k in range(n_total) if k != s]  # pitch-catch: drop the source's own sensor
+        keep = [
+            k for k in range(n_total) if k != s
+        ]  # pitch-catch: drop the source's own sensor
         si, sj = rec_i[s : s + 1], rec_j[s : s + 1]
         sri, srj = rec_i[keep], rec_j[keep]
         with torch.no_grad():
             obs = forward(true_alpha2, sig, si, sj, sri, srj, cfg).traces
-        shots.append(Shot(src_i=si, src_j=sj, rec_i=sri, rec_j=srj, observed=obs.detach()))
+        shots.append(
+            Shot(src_i=si, src_j=sj, rec_i=sri, rec_j=srj, observed=obs.detach())
+        )
 
     return MultiShotProblem(
         cfg=cfg,
@@ -197,4 +201,76 @@ def build_multishot_problem(
         rec_i=rec_i,
         rec_j=rec_j,
         shots=shots,
+    )
+
+
+@dataclass
+class BatchedMultiShot:
+    """Rectangular (GPU-batchable) form of the moving-source acquisition.
+
+    Every shot records at ALL sensors (so the tensors batch), and `self_mask` zeroes each
+    shot's own-sensor trace - numerically the same pitch-catch acquisition as the ragged
+    `MultiShotProblem`, but ready for `invert_multishot_batched`.
+    """
+
+    cfg: SimConfig
+    start_alpha2: torch.Tensor
+    true_alpha2: torch.Tensor
+    active_mask: torch.Tensor
+    src_sig: torch.Tensor  # (nt,) shared wavelet
+    src_i: torch.Tensor  # (S,) per-shot source
+    src_j: torch.Tensor
+    rec_i: torch.Tensor  # (R,) shared sensor ring
+    rec_j: torch.Tensor
+    observed: torch.Tensor  # (S, R, nt) traces through the true model
+    self_mask: torch.Tensor  # (S, R) 0 at each shot's own sensor
+
+
+def build_multishot_batched(
+    grid: str = "logo",
+    *,
+    device: torch.device | str = "cpu",
+    dtype: torch.dtype = torch.float64,
+    cfg: SimConfig | None = None,
+    n_shots: int | None = None,
+) -> BatchedMultiShot:
+    """Batched form of `build_multishot_problem`: records every shot at ALL sensors in one
+    `forward_multishot` pass and returns a `self_mask` for pitch-catch. Equivalent physics
+    to the ragged builder, but the rectangular tensors let the GPU run all shots at once.
+    """
+    start_file, true_file = GRIDS[grid]
+    cfg = cfg or SimConfig()
+    dom_start = read_domain(DATA / start_file)
+    dom_true = read_domain(DATA / true_file)
+    start_alpha2, active = build_alpha2(dom_start, device=device, dtype=dtype)
+    true_alpha2, _ = build_alpha2(dom_true, device=device, dtype=dtype)
+
+    if grid == "small":
+        _, _, rec_i, rec_j = _small_geometry(active)
+    else:
+        rec_i, rec_j = geometry.make_receivers(dom_start, cfg)
+
+    sig = wavelet.gaussian_derivative(cfg, device=device, dtype=dtype)[0]  # (nt,)
+    n_total = int(rec_i.shape[0])
+    idx = _even_indices(n_total, n_shots)
+    sel = torch.tensor(idx, device=rec_i.device)
+    src_i, src_j = rec_i[sel], rec_j[sel]  # sources are a subset of the sensors
+    with torch.no_grad():
+        observed = forward_multishot(true_alpha2, sig, src_i, src_j, rec_i, rec_j, cfg)
+    self_mask = torch.ones((len(idx), n_total), device=device, dtype=dtype)
+    for s, ring_idx in enumerate(idx):
+        self_mask[s, ring_idx] = 0.0  # pitch-catch: drop each shot's own sensor
+
+    return BatchedMultiShot(
+        cfg=cfg,
+        start_alpha2=start_alpha2,
+        true_alpha2=true_alpha2,
+        active_mask=active,
+        src_sig=sig,
+        src_i=src_i,
+        src_j=src_j,
+        rec_i=rec_i,
+        rec_j=rec_j,
+        observed=observed.detach(),
+        self_mask=self_mask,
     )

@@ -56,6 +56,26 @@ class TestForward:
         assert torch.allclose(field, field.flip(0), atol=1e-10)
         assert torch.allclose(field, field.flip(1), atol=1e-10)
 
+    def test_multishot_matches_stacked_single_shots(self):
+        # The batched S-shot solve must equal stacking S single-shot solves to machine
+        # precision: same physics, just one (S, nI, nJ) pass instead of S separate ones.
+        from fwi import wavelet
+
+        n = 21
+        cfg, alpha2 = _uniform_model(n)
+        sig = wavelet.gaussian_derivative(cfg, device=CPU, dtype=F64)  # (1, nt)
+        src_i = torch.tensor([5, 10, 15])
+        src_j = torch.tensor([6, 10, 14])
+        rec_i = torch.tensor([3, 10, 17, 10])  # shared receiver ring
+        rec_j = torch.tensor([10, 3, 10, 17])
+        batched = forward_multishot(alpha2, sig[0], src_i, src_j, rec_i, rec_j, cfg)
+        assert batched.shape == (3, 4, cfg.nt)
+        for s in range(3):
+            single = forward(
+                alpha2, sig, src_i[s : s + 1], src_j[s : s + 1], rec_i, rec_j, cfg
+            ).traces  # (R, nt)
+            assert torch.allclose(batched[s], single, atol=1e-12, rtol=0.0)
+
     def test_axis_orientation_anisotropic_spacing(self):
         # dy spacing is coarser than dx -> wave crosses fewer cells per step in Y,
         # so the index-space extent along X (dim=1) must exceed that along Y (dim=0).

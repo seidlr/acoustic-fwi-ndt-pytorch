@@ -28,7 +28,7 @@ import torch
 
 from fwi.adjoint import adjoint_gradient
 from fwi.config import SPEED_ALUMINUM, SimConfig
-from fwi.forward import forward
+from fwi.forward import forward, forward_multishot
 from fwi.misfit import l2_misfit
 
 if TYPE_CHECKING:
@@ -112,8 +112,15 @@ def _lbfgs_minimize(
             if mask is not None:
                 m.mul_(mask.to(m.dtype))
         history.append(state["j"])
-        _report(it, n_iter, state["j"], state["gnorm"], (m * alpha2_bg).detach(),
-                verbose, callback)
+        _report(
+            it,
+            n_iter,
+            state["j"],
+            state["gnorm"],
+            (m * alpha2_bg).detach(),
+            verbose,
+            callback,
+        )
     alpha2_hat = (m * alpha2_bg).detach()
     with torch.no_grad():
         history.append(float(misfit_of(alpha2_hat)) / J0)
@@ -163,8 +170,15 @@ def invert(
                 "with optimizer='adam'/'sgd'."
             )
         return _lbfgs_minimize(
-            misfit_of, alpha2_init, cfg=cfg, mask=mask, n_iter=n_iter, lr=lr,
-            alpha2_bg=alpha2_bg, verbose=verbose, callback=callback,
+            misfit_of,
+            alpha2_init,
+            cfg=cfg,
+            mask=mask,
+            n_iter=n_iter,
+            lr=lr,
+            alpha2_bg=alpha2_bg,
+            verbose=verbose,
+            callback=callback,
         )
 
     if optimizer not in ("adam", "sgd"):
@@ -278,7 +292,10 @@ def invert_multishot(
 
     m = (alpha2_init.detach() / alpha2_bg).clone().requires_grad_(True)
     opt = torch.optim.LBFGS(
-        [m], lr=lr or 1.0, max_iter=n_iter, history_size=10,
+        [m],
+        lr=lr or 1.0,
+        max_iter=n_iter,
+        history_size=10,
         line_search_fn="strong_wolfe",
     )
     m_max = _cfl_m_max(cfg, alpha2_bg)
@@ -296,8 +313,96 @@ def invert_multishot(
         gn = float(m.grad.norm()) if m.grad is not None else 0.0
         history.append(jv)
         if verbose:
-            print(f"eval {evals['n'] + 1:03d} | loss (J/J0) = {jv:.4e} | "
-                  f"grad_norm = {gn:.3e}")
+            print(
+                f"eval {evals['n'] + 1:03d} | loss (J/J0) = {jv:.4e} | "
+                f"grad_norm = {gn:.3e}"
+            )
+        if callback is not None:
+            callback(evals["n"], jv, (m * alpha2_bg).detach())
+        evals["n"] += 1
+        return jn
+
+    opt.step(closure)
+    with torch.no_grad():
+        m.clamp_(0.0, m_max)
+        if mask is not None:
+            m.mul_(mask.to(m.dtype))
+    alpha2_hat = (m * alpha2_bg).detach()
+    with torch.no_grad():
+        history.append(float(misfit_of(alpha2_hat)) / J0)
+    return alpha2_hat, history
+
+
+def invert_multishot_batched(
+    alpha2_init: torch.Tensor,
+    src_sig: torch.Tensor,
+    src_i: torch.Tensor,
+    src_j: torch.Tensor,
+    rec_i: torch.Tensor,
+    rec_j: torch.Tensor,
+    observed: torch.Tensor,
+    cfg: SimConfig,
+    *,
+    self_mask: torch.Tensor | None = None,
+    active_mask: torch.Tensor | None = None,
+    n_iter: int = 15,
+    lr: float | None = None,
+    alpha2_background: float | None = None,
+    verbose: bool = False,
+    callback: Callable[[int, float, torch.Tensor], None] | None = None,
+) -> tuple[torch.Tensor, list[float]]:
+    """Batched multi-shot FWI - numerically identical to `invert_multishot`, but the S
+    shots run as ONE (S, nI, nJ) `forward_multishot` per evaluation instead of S
+    sequential solves. On a GPU that turns S tiny kernel launches per timestep into one
+    on S x the data, so the device is actually saturated; on CPU it is a smaller win.
+
+    All shots share the wavelet `src_sig` (nt,) and receiver ring `rec_i/rec_j`; shot s
+    fires at `(src_i[s], src_j[s])` and `observed` is `(S, R, nt)`. `self_mask` `(S, R)`
+    zeroes each shot's own-sensor trace (pitch-catch). Returns (alpha2_hat, J/J0 history).
+    """
+    alpha2_bg = alpha2_background or SPEED_ALUMINUM**2
+    mask = active_mask
+    rmask = None if self_mask is None else self_mask[..., None]  # (S, R, 1)
+
+    def misfit_of(alpha2: torch.Tensor) -> torch.Tensor:
+        syn = forward_multishot(alpha2, src_sig, src_i, src_j, rec_i, rec_j, cfg)
+        resid = syn - observed
+        if rmask is not None:
+            resid = resid * rmask
+        return 0.5 * torch.sum(resid * resid) * cfg.dt
+
+    with torch.no_grad():
+        J0 = float(misfit_of(alpha2_init.detach()))
+    if not math.isfinite(J0) or J0 == 0.0:
+        J0 = 1.0
+
+    m = (alpha2_init.detach() / alpha2_bg).clone().requires_grad_(True)
+    opt = torch.optim.LBFGS(
+        [m],
+        lr=lr or 1.0,
+        max_iter=n_iter,
+        history_size=10,
+        line_search_fn="strong_wolfe",
+    )
+    m_max = _cfl_m_max(cfg, alpha2_bg)
+    history: list[float] = []
+    evals = {"n": 0}
+
+    def closure():
+        opt.zero_grad()
+        jn = misfit_of(m.clamp(0.0, m_max) * alpha2_bg) / J0
+        jn.backward()
+        if mask is not None and m.grad is not None:
+            with torch.no_grad():
+                m.grad.mul_(mask.to(m.grad.dtype))
+        jv = float(jn.detach())
+        gn = float(m.grad.norm()) if m.grad is not None else 0.0
+        history.append(jv)
+        if verbose:
+            print(
+                f"eval {evals['n'] + 1:03d} | loss (J/J0) = {jv:.4e} | "
+                f"grad_norm = {gn:.3e}"
+            )
         if callback is not None:
             callback(evals["n"], jv, (m * alpha2_bg).detach())
         evals["n"] += 1

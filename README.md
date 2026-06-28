@@ -84,6 +84,12 @@ MPS - the **hockey-stick test is cleanest on CPU/CUDA (float64)**, where the cle
 range is longest; on MPS (float32) the round-off floor is reached at a larger step `h`, so
 the stick turns up earlier (expected, not a bug).
 
+For the moving-source acquisition, `forward_multishot` / `invert_multishot_batched` run all
+S shots as one `(S, nI, nJ)` batch instead of S sequential solves: the misfit is identical
+(bit-for-bit), but each timestep is one stencil kernel doing Sx the work, so the GPU is
+saturated rather than launch-bound. Notebook 03's benchmark measures it (~3.5x on Apple MPS
+for 8 shots; larger on a CUDA GPU, where the per-launch overhead it removes is higher).
+
 ## MATLAB -> PyTorch map
 
 The port follows the thesis `InversionToolbox/ndt` (under `resources/PhD-FWI-MATLAB/`):
