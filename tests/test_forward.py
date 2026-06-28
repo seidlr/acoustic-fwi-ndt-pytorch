@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import torch
 
-from fwi.config import SimConfig, SPEED_LIMESTONE
+from fwi.config import SimConfig, SPEED_ALUMINUM
 from fwi.forward import forward
 
 F64 = torch.float64
@@ -16,9 +16,9 @@ CPU = torch.device("cpu")
 
 
 def _uniform_model(n, *, dx=1.0, dy=1.0):
-    """Square uniform-limestone model (no ghost) for clean physics checks."""
+    """Square uniform-aluminum model (no ghost) for clean physics checks."""
     cfg = SimConfig(nt=120, dx=dx, dy=dy)
-    alpha2 = torch.full((n, n), SPEED_LIMESTONE**2, device=CPU, dtype=F64)
+    alpha2 = torch.full((n, n), SPEED_ALUMINUM**2, device=CPU, dtype=F64)
     return cfg, alpha2
 
 
@@ -39,8 +39,9 @@ class TestForward:
         rec_j = torch.tensor([5])
         res = forward(alpha2, sig, si, sj, rec_i, rec_j, cfg)
         assert torch.isfinite(res.traces).all()
-        # bounded: a stable scheme keeps amplitudes near source-scale, not exploding
-        assert float(res.traces.abs().max()) < 1.0
+        # stable: bounded well below explosion. With the real source the wavefield is
+        # O(1e4); an unstable (CFL-violating) scheme would blow past 1e8 quickly.
+        assert float(res.traces.abs().max()) < 1e8
 
     def test_centered_source_symmetric_wavefield(self):
         n = 21

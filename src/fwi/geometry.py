@@ -1,8 +1,8 @@
-"""Source and receiver placement on the grid.
+"""Source and sensor placement on the 200x100 mm plate.
 
-Receiver ring follows setupForwardParameters.m:46-74 (sensors on the four plate
-edges). For the adjoint solve the receivers become sources (setupAdjointParameters.m).
-Real-world coordinates are mapped to 0-based grid indices via the Domain coord maps.
+Sensor layout is the thesis "ThinBoundary_16Sensors" (setSensorPositionCase.m case 0)
+and the source is at (110, 60) mm (run_inversion.m, actuator-sensor mode). Real-world
+coordinates are mapped to 0-based grid indices via the Domain coord maps (y->i, x->j).
 """
 
 from __future__ import annotations
@@ -13,31 +13,23 @@ import torch
 from fwi.config import SimConfig
 from fwi.domain import Domain
 
+# Thesis 16-sensor "thin complete boundary" (setSensorPositionCase.m case 0) [mm].
+_SENSOR_X = np.array(
+    [30, 30, 170, 170, 40, 100, 160, 40, 100, 160, 30, 199, 70, 130, 70, 130], float
+)
+_SENSOR_Y = np.array(
+    [35, 70, 35, 70, 30, 30, 30, 70, 70, 70, 52, 52, 30, 30, 70, 70], float
+)
 
-def receiver_ring(cfg: SimConfig) -> tuple[np.ndarray, np.ndarray]:
-    """Real-world (x, y) receiver coordinates on the four plate edges.
 
-    Two vertical edges (x = x_min, x_max) sampled at divisions_y+1 y-values, plus
-    two horizontal edges (y = y_min, y_max) sampled at divisions_x+1 x-values.
-    Default config -> 6 + 8 = 14 receivers.
-    """
-    ys = np.linspace(cfg.y_min, cfg.y_max, cfg.divisions_y + 1)  # left/right edges
-    xs = np.linspace(cfg.x_min, cfg.x_max, cfg.divisions_x + 1)  # top/bottom edges
+def sensor_ring(cfg: SimConfig) -> tuple[np.ndarray, np.ndarray]:
+    """Real-world (x, y) sensor coordinates - the thesis 16-sensor thin boundary."""
+    return _SENSOR_X.copy(), _SENSOR_Y.copy()
 
-    # left + right vertical edges
-    x_edge_v = np.concatenate(
-        [np.full_like(ys, cfg.x_min), np.full_like(ys, cfg.x_max)]
-    )
-    y_edge_v = np.concatenate([ys, ys])
-    # top + bottom horizontal edges
-    x_edge_h = np.concatenate([xs, xs])
-    y_edge_h = np.concatenate(
-        [np.full_like(xs, cfg.y_min), np.full_like(xs, cfg.y_max)]
-    )
 
-    x_rec = np.concatenate([x_edge_v, x_edge_h])
-    y_rec = np.concatenate([y_edge_v, y_edge_h])
-    return x_rec, y_rec
+def source_position(cfg: SimConfig) -> tuple[float, float]:
+    """Single actuator source location (x, y) [mm]."""
+    return cfg.x_src, cfg.y_src
 
 
 def coords_to_indices(domain: Domain, x, y) -> tuple[torch.Tensor, torch.Tensor]:
@@ -70,6 +62,6 @@ def make_sources(domain: Domain, x_src, y_src) -> tuple[torch.Tensor, torch.Tens
 
 
 def make_receivers(domain: Domain, cfg: SimConfig) -> tuple[torch.Tensor, torch.Tensor]:
-    """Receiver grid indices (i, j) for the configured ring."""
-    x_rec, y_rec = receiver_ring(cfg)
+    """Sensor grid indices (i, j) for the thesis 16-sensor ring."""
+    x_rec, y_rec = sensor_ring(cfg)
     return coords_to_indices(domain, x_rec, y_rec)

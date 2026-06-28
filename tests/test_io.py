@@ -9,9 +9,10 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import numpy as np
 import torch
 
-from fwi.config import SimConfig, SPEED_LIMESTONE
+from fwi.config import SimConfig, SPEED_ALUMINUM, SPEED_CRACK
 from fwi.domain import read_domain, build_alpha2
 from fwi import geometry, wavelet
 
@@ -22,76 +23,79 @@ CPU = torch.device("cpu")
 
 class TestIO:
     # ---- domain ----
-    def test_read_domain_small_dims_and_labels(self):
-        dom = read_domain(DATA / "SmallDomain2D.txt")
-        # MATLAB squeeze -> (nI, nJ) = (14, 34)
-        assert dom.labels.shape == (14, 34)
-        assert dom.dims == (14, 34, 1)
-        # 2-cell ghost border (label 0); interior is limestone (label 1)
-        assert dom.labels[0, 0] == 0
-        assert dom.labels[6, 15] == 1
+    def test_read_domain_plate_dims_and_crack_not_transposed(self):
+        dom = read_domain(DATA / "cracked.txt")
+        # package convention (nI=Y=104, nJ=X=204) - NOT transposed
+        assert dom.labels.shape == (104, 204)
+        assert dom.dims == (104, 204, 1)
+        assert dom.labels[0, 0] == 0  # ghost border
+        # crack at rows Y 48..50, cols X 79..109 (MATLAB data(80:110,49:51) translated)
+        import numpy as np
 
-    def test_build_alpha2_ghost_and_interior(self):
-        dom = read_domain(DATA / "SmallDomain2D.txt")
+        yi, xj = np.where(dom.labels == 2)
+        assert (yi.min(), yi.max()) == (48, 50)
+        assert (xj.min(), xj.max()) == (79, 109)
+
+    def test_build_alpha2_ghost_and_materials(self):
+        dom = read_domain(DATA / "cracked.txt")
         alpha2, active = build_alpha2(dom, device=CPU, dtype=F64)
-        assert alpha2.shape == (14, 34)
-        # ghost cell -> 0 and masked out
-        assert alpha2[0, 0].item() == 0.0
+        assert alpha2.shape == (104, 204)
+        assert alpha2[0, 0].item() == 0.0  # ghost -> 0
         assert active[0, 0].item() is False
-        # interior cell -> limestone speed^2 and active
-        assert alpha2[6, 15].item() == SPEED_LIMESTONE**2
-        assert active[6, 15].item() is True
+        assert alpha2[50, 150].item() == SPEED_ALUMINUM**2  # aluminum interior
+        assert alpha2[49, 90].item() == SPEED_CRACK**2  # crack cell
 
     # ---- geometry ----
-    def test_receiver_ring_count_and_inside_active(self):
+    def test_sensor_ring_count_and_inside_active(self):
         cfg = SimConfig()
-        dom = read_domain(DATA / "Domain2D_model.txt")
-        x_rec, y_rec = geometry.receiver_ring(cfg)
-        assert len(x_rec) == 14 and len(y_rec) == 14
+        dom = read_domain(DATA / "homogeneous.txt")
+        x_rec, y_rec = geometry.sensor_ring(cfg)
+        assert len(x_rec) == 16 and len(y_rec) == 16  # thesis thin-boundary sensors
         i, j = geometry.coords_to_indices(dom, x_rec, y_rec)
         _, active = build_alpha2(dom, device=CPU, dtype=F64)
-        # every receiver lands inside the grid and on a non-ghost cell
         assert int(i.min()) >= 0 and int(i.max()) < dom.dims[0]
         assert int(j.min()) >= 0 and int(j.max()) < dom.dims[1]
-        assert bool(active[i, j].all())
+        assert bool(active[i, j].all())  # all sensors on non-ghost cells
 
     def test_make_sources_accepts_vector(self):
-        dom = read_domain(DATA / "Domain2D_model.txt")
-        xs = [117.0, 152.0, 173.0, 153.0]
-        ys = [47.0, 31.0, 46.0, 71.0]
+        dom = read_domain(DATA / "homogeneous.txt")
+        xs = [40.0, 100.0, 160.0, 130.0]
+        ys = [30.0, 30.0, 70.0, 70.0]
         i, j = geometry.make_sources(dom, xs, ys)
         assert i.shape == (4,) and j.shape == (4,)
 
     # ---- wavelet ----
-    def test_wavelet_matches_matlab_formula(self):
+    def test_wavelet_matches_gaussian_derivative_formula(self):
+        # Real GaussianDerivativeSourceTerm.m: deviation^3 normalization, scalingFactor.
         cfg = SimConfig()
         src = wavelet.gaussian_derivative(cfg, device=CPU, dtype=F64)
         assert src.shape == (1, cfg.nt)
 
-        # independent scalar recomputation (different code path) at 3 times
-        dt, f0, t0, scaling = cfg.dt, cfg.f0, cfg.t0, cfg.scaling
-        sigma = scaling / (2.0 * math.pi * f0)
+        # numpy float64 reference with the SAME formula (the ~1e24 prefactor makes
+        # hand-arithmetic error-prone), compared at ALL samples.
+        t = (np.arange(1, cfg.nt + 1)) * cfg.dt
+        deviation = 1.0 / (2.0 * math.pi * cfg.f0)
         sing = 1.0 / (cfg.dx * cfg.dy)
-        for k in (0, cfg.nt // 2, cfg.nt - 1):
-            t = (k + 1) * dt
-            a = t - t0
-            expected = (
-                -(sigma**2)
-                * a
-                / (math.sqrt(2.0 * math.pi) * sigma)
-                * math.exp(-(a**2) / (2.0 * sigma**2))
-                * sing
-            )
-            assert abs(src[0, k].item() - expected) < 1e-9
+        a = t - cfg.t0
+        expected = (
+            -cfg.scaling_factor
+            * a
+            / (math.sqrt(2.0 * math.pi) * deviation**3)
+            * np.exp(-(a**2) / (2.0 * deviation**2))
+            * sing
+        )
+        got = src[0].cpu().numpy()
+        rel = np.linalg.norm(got - expected) / np.linalg.norm(expected)
+        assert rel < 1e-12
+        # amplitude is now well-scaled (large), NOT the old ~1e-11
+        assert float(np.abs(expected).max()) > 1e10
 
     def test_wavelet_multi_frequency_distinct_rows(self):
         cfg = SimConfig()
         src = wavelet.gaussian_derivative(
-            cfg, f0=[10000.0, 20000.0], device=CPU, dtype=F64
+            cfg, f0=[100000.0, 200000.0], device=CPU, dtype=F64
         )
         assert src.shape == (2, cfg.nt)
-        # scale-aware: the MATLAB wavelet amplitudes are tiny, so compare relative
-        # difference rather than absolute (allclose's atol would call both ~0).
         rel = (src[0] - src[1]).norm() / src[0].norm()
         assert rel > 0.1
         # different f0 -> different default t0 -> different peak location

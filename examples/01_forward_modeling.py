@@ -1,8 +1,8 @@
-"""Example 1: forward modeling on the 2D plate.
+"""Example 1: forward modeling on the aluminum plate.
 
-Regenerates the synthetic (homogeneous start model) and observed (perturbed, true
-model) receiver traces from the domain files - replacing the large MATLAB .mat
-seismograms - and saves wavefield snapshots.
+Forward-models the homogeneous (start) and cracked (true) 200x100 mm aluminum plates
+and saves the wavefield snapshot + receiver traces. Regenerates the data the inversion
+examples consume.
 
 Run: uv run python examples/01_forward_modeling.py
 """
@@ -22,23 +22,15 @@ DATA = Path(__file__).resolve().parents[1] / "data" / "domain"
 OUT = Path("outputs")
 
 
-def run_model(domain_file: str, cfg, device, dtype, *, capture_field: bool):
+def run(domain_file: str, cfg, device, dtype, *, capture_field: bool):
     dom = read_domain(DATA / domain_file)
     alpha2, _ = build_alpha2(dom, device=device, dtype=dtype)
     src_i, src_j = geometry.make_sources(dom, cfg.x_src, cfg.y_src)
     rec_i, rec_j = geometry.make_receivers(dom, cfg)
     sig = wavelet.gaussian_derivative(cfg, device=device, dtype=dtype)
-    res = forward(
-        alpha2,
-        sig,
-        src_i,
-        src_j,
-        rec_i,
-        rec_j,
-        cfg,
-        capture_wavefield=capture_field,
+    return forward(
+        alpha2, sig, src_i, src_j, rec_i, rec_j, cfg, capture_wavefield=capture_field
     )
-    return dom, res
 
 
 def main() -> None:
@@ -46,14 +38,13 @@ def main() -> None:
     device = resolve_device()
     dtype = resolve_dtype(device)
     cfg = SimConfig()
-    print(f"device={device} dtype={dtype} nt={cfg.nt} dt={cfg.dt:.3e}s")
-
-    # Synthetic = homogeneous start model (capture wavefield for snapshots).
-    _, syn = run_model("Domain2D_model.txt", cfg, device, dtype, capture_field=True)
-    # Observed = true model with a gold inclusion.
-    _, obs = run_model(
-        "Domain2D_Fichtner_1pt_oben.txt", cfg, device, dtype, capture_field=False
+    print(
+        f"device={device} dtype={dtype} | aluminum plate 200x100mm @1mm, "
+        f"f0={cfg.f0 / 1e3:.0f}kHz, dt={cfg.dt:.2e}s, nt={cfg.nt}"
     )
+
+    syn = run("homogeneous.txt", cfg, device, dtype, capture_field=True)
+    obs = run("cracked.txt", cfg, device, dtype, capture_field=False)
 
     np.savez(
         OUT / "seismograms.npz",
@@ -61,30 +52,22 @@ def main() -> None:
         observed=obs.traces.detach().cpu().numpy(),
         dt=cfg.dt,
     )
-
-    # snapshot at a step where the wavefront has developed
-    snap = syn.wavefield[cfg.nt // 3]
     plotting.save_field(
-        snap,
-        OUT / "forward_wavefield_snapshot.png",
-        title=f"synthetic wavefield, step {cfg.nt // 3}",
+        syn.wavefield[cfg.nt // 3],
+        OUT / "forward_wavefield.png",
+        title=f"aluminum wavefield, step {cfg.nt // 3}",
     )
     plotting.save_traces(
         syn.traces,
         OUT / "forward_synthetic_traces.png",
-        title="synthetic receiver traces",
+        title="synthetic (homogeneous)",
     )
     plotting.save_traces(
-        obs.traces,
-        OUT / "forward_observed_traces.png",
-        title="observed receiver traces",
+        obs.traces, OUT / "forward_observed_traces.png", title="observed (cracked)"
     )
-
     resid = (syn.traces - obs.traces).abs().max().item()
-    print(f"saved traces + snapshots to {OUT}/")
-    print(
-        f"max |synthetic - observed| at receivers: {resid:.3e} (non-zero => defect visible)"
-    )
+    print(f"saved snapshots + traces to {OUT}/")
+    print(f"max |synthetic - observed| = {resid:.3e} (crack signal at sensors)")
 
 
 if __name__ == "__main__":

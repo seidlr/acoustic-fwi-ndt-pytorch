@@ -4,10 +4,10 @@ Make alpha2 a leaf tensor with requires_grad, run the forward solver + L2 misfit
 call backward(), and read alpha2.grad. This is "FWI gradient for free" - autograd
 backprops through the whole time-stepping loop.
 
-Defaults to the small grid (a full 104x304x800 autograd graph is GB-scale, esp. on
-MPS float32). Use --grid full only on a machine with enough memory.
+On the full aluminum plate (104x204x1000) the autograd graph is sizeable but tractable
+on CPU; use --grid small for a quick check.
 
-Run: uv run python examples/02_gradient_autodiff.py [--grid small|full] [--device cpu|mps|cuda]
+Run: uv run python examples/02_gradient_autodiff.py [--grid small|crack] [--device cpu|mps|cuda]
 """
 
 from __future__ import annotations
@@ -27,18 +27,13 @@ OUT = Path("outputs")
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--grid", choices=["small", "full"], default="small")
+    ap.add_argument("--grid", choices=["small", "crack"], default="crack")
     ap.add_argument("--device", default="cpu", help="cpu (float64, clean) | mps | cuda")
     args = ap.parse_args()
 
     OUT.mkdir(exist_ok=True)
     device = torch.device(args.device)
     dtype = resolve_dtype(device)
-    if args.grid == "full":
-        print(
-            "[note] full grid: the autograd graph is memory-heavy (~GB); "
-            "prefer the manual adjoint (example 03) for the full plate."
-        )
 
     prob = build_problem(args.grid, device=device, dtype=dtype)
     grad, misfit = autodiff_gradient(

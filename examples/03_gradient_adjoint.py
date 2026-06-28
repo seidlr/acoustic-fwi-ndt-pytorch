@@ -5,7 +5,7 @@ Re-runs the forward solve capturing the bare Laplacian, solves the adjoint probl
 the sensitivity kernel dJ/d(alpha2). Prints the agreement with the autodiff gradient
 and (Task 6) saves the Taylor / hockey-stick verification plot.
 
-Run: uv run python examples/03_gradient_adjoint.py [--grid small|full] [--device cpu|mps|cuda]
+Run: uv run python examples/03_gradient_adjoint.py [--grid small|crack] [--device cpu|mps|cuda]
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ OUT = Path("outputs")
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--grid", choices=["small", "full"], default="small")
+    ap.add_argument("--grid", choices=["small", "crack"], default="small")
     ap.add_argument("--device", default="cpu", help="cpu (float64, clean) | mps | cuda")
     args = ap.parse_args()
 

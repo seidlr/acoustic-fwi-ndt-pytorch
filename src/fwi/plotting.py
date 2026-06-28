@@ -114,3 +114,25 @@ def save_traces(traces, path, title: str = "receiver traces"):
     fig.savefig(p, dpi=120)
     plt.close(fig)
     return p
+
+
+def save_frequency_panel(
+    models, freqs, path, title="inverted wave speed vs source frequency"
+):
+    """Thesis-style multi-panel: one recovered-speed image per source frequency."""
+    p = _ensure(path)
+    n = len(models)
+    fig, axes = plt.subplots(1, n, figsize=(4.0 * n, 3.2))
+    if n == 1:
+        axes = [axes]
+    vmax = max(float(np.abs(_np(m)).max()) or 1.0 for m in models)
+    for ax, m, f in zip(axes, models, freqs):
+        im = ax.imshow(_np(m), cmap="seismic", aspect="equal", vmin=-vmax, vmax=vmax)
+        ax.set_title(f"{f / 1e3:.0f} kHz")
+        ax.set_xlabel("x index (j)")
+    axes[0].set_ylabel("y index (i)")
+    fig.colorbar(im, ax=axes, fraction=0.02)
+    fig.suptitle(title)
+    fig.savefig(p, dpi=120)
+    plt.close(fig)
+    return p

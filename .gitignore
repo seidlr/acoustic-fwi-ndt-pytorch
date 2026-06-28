@@ -18,6 +18,9 @@ outputs/
 # Private PhD MATLAB source (symlink; not part of this repo)
 resources/
 
+# Tooling indexes
+.codegraph/
+
 # OS / editor
 .DS_Store
 .vscode/
