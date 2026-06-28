@@ -9,7 +9,7 @@ from __future__ import annotations
 import torch
 
 from fwi.config import SimConfig, SPEED_ALUMINUM
-from fwi.forward import forward
+from fwi.forward import forward, forward_multishot
 
 F64 = torch.float64
 CPU = torch.device("cpu")

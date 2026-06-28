@@ -11,8 +11,8 @@ import math
 
 import torch
 
-from fwi.problems import build_problem
-from fwi.inversion import invert
+from fwi.problems import build_problem, build_multishot_problem
+from fwi.inversion import invert, invert_multishot
 from fwi.misfit import l2_misfit
 
 F64 = torch.float64
@@ -57,6 +57,36 @@ class TestInversion:
         assert history[-1] < history[0] / 10.0
 
         # recovered update localizes at the true defect
+        update = (alpha2_hat - prob.start_alpha2).abs()
+        true_diff = (prob.true_alpha2 - prob.start_alpha2).abs()
+        ti, tj = torch.where(true_diff > 0)
+        ui = int(update.argmax() // update.shape[1])
+        uj = int(update.argmax() % update.shape[1])
+        di = min(abs(ui - int(t)) for t in ti)
+        dj = min(abs(uj - int(t)) for t in tj)
+        assert di <= 3 and dj <= 3
+
+    def test_invert_multishot_reduces_misfit_and_localizes(self):
+        # Round-robin acquisition: each sensor fires in turn, the OTHER sensors record;
+        # the misfit/gradient sum over shots. Should reduce J/J0 and localize.
+        prob = build_multishot_problem("small", device=CPU, dtype=F64)
+        n_shots = len(prob.shots)
+        assert n_shots >= 6
+        # pitch-catch: every shot excludes its own source sensor
+        assert all(int(s.rec_i.shape[0]) == n_shots - 1 for s in prob.shots)
+        alpha2_hat, history = invert_multishot(
+            prob.start_alpha2,
+            prob.shots,
+            prob.src_sig,
+            prob.cfg,
+            active_mask=prob.active_mask,
+            n_iter=20,
+        )
+        assert all(math.isfinite(h) for h in history)
+        assert abs(history[0] - 1.0) < 0.5
+        assert history[1] < history[0]
+        assert history[-1] < history[0] / 10.0
+
         update = (alpha2_hat - prob.start_alpha2).abs()
         true_diff = (prob.true_alpha2 - prob.start_alpha2).abs()
         ti, tj = torch.where(true_diff > 0)

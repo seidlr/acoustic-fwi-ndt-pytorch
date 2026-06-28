@@ -56,6 +56,7 @@ def main() -> None:
         syn.wavefield[cfg.nt // 3],
         OUT / "forward_wavefield.png",
         title=f"aluminum wavefield, step {cfg.nt // 3}",
+        cmap="RdBu",
     )
     plotting.save_traces(
         syn.traces,

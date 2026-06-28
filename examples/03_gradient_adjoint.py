@@ -76,6 +76,7 @@ def main() -> None:
         kernel,
         OUT / f"adjoint_kernel_{args.grid}.png",
         title=f"adjoint-state dJ/d(alpha2) ({args.grid} grid)",
+        cmap="RdBu",
     )
     print(f"saved adjoint kernel to {OUT}/adjoint_kernel_{args.grid}.png")
 

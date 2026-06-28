@@ -31,9 +31,14 @@ def _ensure(path: str | Path) -> Path:
 
 
 def save_field(
-    field, path, title: str = "", cmap: str = "seismic", symmetric: bool = True
+    field, path, title: str = "", cmap: str = "gray_r", symmetric: bool = True
 ):
-    """Save a 2D field image (i->Y down, j->X across)."""
+    """Save a 2D field image (i->Y down, j->X across).
+
+    Default `gray_r` matches the thesis recovered-model plots (`plotSpeed.m`,
+    `flipud(gray)`): slow defects render light, the fast background dark. Pass
+    `cmap="RdBu"` for signed wave/sensitivity fields (the thesis wavefield colormap).
+    """
     f = _np(field)
     p = _ensure(path)
     fig, ax = plt.subplots(figsize=(7, 3.2))
@@ -105,7 +110,7 @@ def save_traces(traces, path, title: str = "receiver traces"):
     p = _ensure(path)
     fig, ax = plt.subplots(figsize=(7, 3.2))
     m = float(np.abs(t).max()) or 1.0
-    im = ax.imshow(t, cmap="seismic", aspect="auto", vmin=-m, vmax=m)
+    im = ax.imshow(t, cmap="RdBu", aspect="auto", vmin=-m, vmax=m)
     ax.set_title(title)
     ax.set_xlabel("time step")
     ax.set_ylabel("receiver")
@@ -127,7 +132,7 @@ def save_frequency_panel(
         axes = [axes]
     vmax = max(float(np.abs(_np(m)).max()) or 1.0 for m in models)
     for ax, m, f in zip(axes, models, freqs):
-        im = ax.imshow(_np(m), cmap="seismic", aspect="equal", vmin=-vmax, vmax=vmax)
+        im = ax.imshow(_np(m), cmap="gray_r", aspect="equal", vmin=-vmax, vmax=vmax)
         ax.set_title(f"{f / 1e3:.0f} kHz")
         ax.set_xlabel("x index (j)")
     axes[0].set_ylabel("y index (i)")

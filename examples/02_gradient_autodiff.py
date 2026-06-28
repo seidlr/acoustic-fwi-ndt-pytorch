@@ -58,6 +58,7 @@ def main() -> None:
         grad,
         OUT / f"autodiff_kernel_{args.grid}.png",
         title=f"autodiff dJ/d(alpha2) ({args.grid} grid)",
+        cmap="RdBu",
     )
     print(f"saved kernel image to {OUT}/autodiff_kernel_{args.grid}.png")
 

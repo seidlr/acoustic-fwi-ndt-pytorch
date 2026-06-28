@@ -48,6 +48,45 @@ class Problem:
     observed: torch.Tensor  # (n_rec, nt) traces through the true model
 
 
+@dataclass
+class Shot:
+    """One acquisition: a source at one sensor, recorded at the OTHER sensors.
+
+    The source's own sensor is excluded (pitch-catch): its co-located trace is dominated
+    by the direct source injection, an uninformative high-amplitude term that otherwise
+    inflates the misfit normalization and stalls the inversion.
+    """
+
+    src_i: torch.Tensor
+    src_j: torch.Tensor
+    rec_i: torch.Tensor
+    rec_j: torch.Tensor
+    observed: torch.Tensor  # (n_rec, nt) traces through the true model
+
+
+@dataclass
+class MultiShotProblem:
+    cfg: SimConfig
+    start_alpha2: torch.Tensor
+    true_alpha2: torch.Tensor
+    active_mask: torch.Tensor
+    src_sig: torch.Tensor
+    rec_i: torch.Tensor
+    rec_j: torch.Tensor
+    shots: list[Shot]
+
+
+def _even_indices(n_total: int, n_shots: int | None) -> list[int]:
+    """Evenly spaced sensor indices (inclusive of endpoints), de-duplicated."""
+    if not n_shots or n_shots >= n_total:
+        return list(range(n_total))
+    if n_shots == 1:
+        return [0]
+    raw = [round(k * (n_total - 1) / (n_shots - 1)) for k in range(n_shots)]
+    seen: set[int] = set()
+    return [i for i in raw if not (i in seen or seen.add(i))]
+
+
 def _bounds(active: torch.Tensor) -> tuple[int, int, int, int]:
     rows = torch.where(active.any(dim=1))[0]
     cols = torch.where(active.any(dim=0))[0]
@@ -108,4 +147,54 @@ def build_problem(
         rec_i=rec_i,
         rec_j=rec_j,
         observed=observed.detach(),
+    )
+
+
+def build_multishot_problem(
+    grid: str = "logo",
+    *,
+    device: torch.device | str = "cpu",
+    dtype: torch.dtype = torch.float64,
+    cfg: SimConfig | None = None,
+    n_shots: int | None = None,
+) -> MultiShotProblem:
+    """Round-robin (full-matrix-capture) acquisition for `grid`.
+
+    Each sensor fires in turn - a single source moving from receiver to receiver -
+    while all sensors record. Illuminating the medium from many angles conditions the
+    inversion far better than a single fixed source. `n_shots` evenly subsamples the
+    sensor array (to trade illumination for runtime); the default fires every sensor.
+    """
+    start_file, true_file = GRIDS[grid]
+    cfg = cfg or SimConfig()
+    dom_start = read_domain(DATA / start_file)
+    dom_true = read_domain(DATA / true_file)
+    start_alpha2, active = build_alpha2(dom_start, device=device, dtype=dtype)
+    true_alpha2, _ = build_alpha2(dom_true, device=device, dtype=dtype)
+
+    if grid == "small":
+        _, _, rec_i, rec_j = _small_geometry(active)
+    else:
+        rec_i, rec_j = geometry.make_receivers(dom_start, cfg)
+
+    sig = wavelet.gaussian_derivative(cfg, device=device, dtype=dtype)
+    n_total = int(rec_i.shape[0])
+    shots: list[Shot] = []
+    for s in _even_indices(n_total, n_shots):
+        keep = [k for k in range(n_total) if k != s]  # pitch-catch: drop the source's own sensor
+        si, sj = rec_i[s : s + 1], rec_j[s : s + 1]
+        sri, srj = rec_i[keep], rec_j[keep]
+        with torch.no_grad():
+            obs = forward(true_alpha2, sig, si, sj, sri, srj, cfg).traces
+        shots.append(Shot(src_i=si, src_j=sj, rec_i=sri, rec_j=srj, observed=obs.detach()))
+
+    return MultiShotProblem(
+        cfg=cfg,
+        start_alpha2=start_alpha2,
+        true_alpha2=true_alpha2,
+        active_mask=active,
+        src_sig=sig,
+        rec_i=rec_i,
+        rec_j=rec_j,
+        shots=shots,
     )

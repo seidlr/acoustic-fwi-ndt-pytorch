@@ -26,6 +26,11 @@ codebase.
   J0-normalized misfit `J/J0` (starts at 1.0), so the standard `lr=1.0` step works.
 - **Three thesis results** - single-crack L-BFGS convergence, a 50/100/200 kHz frequency
   study, and the multi-defect "L i square" logo recovered by frequency continuation.
+- **Multi-shot acquisition** - round-robin / full-matrix capture: a single source moving
+  from sensor to sensor (each fires in turn, the OTHER sensors record), with the misfit
+  and gradient summed over shots. Combining recordings from many source positions
+  illuminates the medium from many angles and sharpens the reconstruction over a single
+  source position.
 
 ## Physical setup (thesis-faithful)
 
@@ -50,7 +55,7 @@ loop** (`iter k/N | loss (J/J0) | grad_norm`) and plots the loss curve. (If you 
 |---|---|---|
 | `notebooks/01_autodiff_fwi.ipynb` | Forward modeling on the aluminum plate + autodiff gradient | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/01_autodiff_fwi.ipynb) |
 | `notebooks/02_adjoint_fwi_hockey_stick.ipynb` | Adjoint == autodiff, hockey-stick test, single-crack L-BFGS inversion | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/02_adjoint_fwi_hockey_stick.ipynb) |
-| `notebooks/03_frequency_study_and_logo.ipynb` | 50/100/200 kHz frequency study + multi-defect logo via frequency continuation | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/03_frequency_study_and_logo.ipynb) |
+| `notebooks/03_frequency_study_and_logo.ipynb` | 50/100/200 kHz frequency study, multi-defect logo, multi-shot (moving-source) acquisition + CPU/GPU benchmark | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/03_frequency_study_and_logo.ipynb) |
 
 ## Quickstart (uv, local)
 
@@ -64,6 +69,7 @@ uv run python examples/03_gradient_adjoint.py        # adjoint kernel + hockey-s
 uv run python examples/04_crack_inversion_lbfgs.py   # single-crack L-BFGS convergence
 uv run python examples/05_frequency_study.py         # 50/100/200 kHz frequency study (logo)
 uv run python examples/06_logo_inversion.py          # multi-defect logo via continuation
+uv run python examples/07_multishot_logo.py          # moving source: many recordings vs one
 ```
 
 Each example writes figures to `outputs/`. Pass `--device mps` (Apple) or `--device cuda`
