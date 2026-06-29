@@ -57,6 +57,7 @@ loop** (`iter k/N | loss (J/J0) | grad_norm`) and plots the loss curve. (If you 
 | `notebooks/02_adjoint_fwi_hockey_stick.ipynb` | Adjoint == autodiff, hockey-stick test, single-crack L-BFGS inversion | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/02_adjoint_fwi_hockey_stick.ipynb) |
 | `notebooks/03_frequency_study_and_logo.ipynb` | 50/100/200 kHz frequency study, multi-defect logo, multi-shot (moving-source) acquisition + CPU/GPU benchmark | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/03_frequency_study_and_logo.ipynb) |
 | `notebooks/04_fwi_as_nn_training.ipynb` | FWI as PyTorch training: the wave solver as an `nn.Module`, the model as `nn.Parameter`, `loss.backward()` as the adjoint. Variant A: full-batch `LBFGS`; Variant B: mini-batch `Adam` over shots (stochastic FWI) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/04_fwi_as_nn_training.ipynb) |
+| `notebooks/05_speed_investigation.ipynb` | Speeding up the solve: native **Rust** forward + adjoint (drives L-BFGS), a fused **conv2d** stencil, and **batched** moving sources - each verified equal to the reference solver, then benchmarked. The Colab setup cell builds the Rust extension | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/seidlr/acoustic-fwi-ndt-pytorch/blob/main/notebooks/05_speed_investigation.ipynb) |
 
 ## Quickstart (uv, local)
 
@@ -91,6 +92,31 @@ S shots as one `(S, nI, nJ)` batch instead of S sequential solves: the misfit is
 saturated rather than launch-bound. Notebook 03's benchmark measures it (~3.5x on Apple MPS
 for 8 shots; larger on a CUDA GPU, where the per-launch overhead it removes is higher).
 
+## Speed investigation (optional Rust extension)
+
+The forward solve is a Python loop over 1000 timesteps, each launching ~20 tiny ops on a
+104x204 grid - so it is **overhead/launch bound**, not FLOP bound. Notebook 05 measures
+three ways to attack that, each verified equal to `fwi.forward.forward` before timing:
+
+- **Rust** (`rust/`, PyO3) - the forward solve *and* the adjoint-state gradient in compiled
+  code, wrapped as a `torch.autograd.Function` (`fwi.rust_solver`) so `loss.backward()`
+  drives L-BFGS. The gradient matches autograd to ~1e-15. It wins most on the *inversion*
+  (skips building/walking the autograd tape); CPU-only (keeping the GPU would need CUDA/Metal
+  kernels too).
+- **conv2d** (`fwi.forward_conv2d`) - the Laplacian as one fused `conv2d` kernel; stays
+  differentiable and helps on the **GPU** (on CPU float64 it can be slower).
+- **Batched sources** - `forward_multishot`, above.
+
+The Rust extension is opt-in. Build it (the `speedtest` extra provides maturin):
+
+```bash
+uv sync --extra speedtest
+uv run maturin develop --release -m rust/Cargo.toml   # builds `fwi_rust` into the venv
+```
+
+Everything else stays pure-PyTorch and `pip`-installable; `fwi.rust_solver.rust_available()`
+reports whether the extension is present, and the notebook/tests skip the Rust path if not.
+
 ## MATLAB -> PyTorch map
 
 The port follows the thesis `InversionToolbox/ndt` (under `resources/PhD-FWI-MATLAB/`):
@@ -117,12 +143,13 @@ Two fidelity points:
 ## Project layout
 
 ```
-src/fwi/        config, domain, domaingen, geometry, wavelet, forward, misfit, adjoint,
-                gradient_test, inversion, plotting, problems
-examples/       01..06 runnable scripts
-notebooks/      01..04 Colab notebooks
+src/fwi/        config, domain, domaingen, geometry, wavelet, forward, forward_conv2d,
+                misfit, adjoint, gradient_test, inversion, plotting, problems, rust_solver
+rust/           native forward + adjoint solver (PyO3/maturin; opt-in `speedtest` extra)
+examples/       01..07 runnable scripts
+notebooks/      01..05 Colab notebooks
 data/domain/    plate domain files (homogeneous, cracked, 2/3-crack, logo, small)
-tests/          io, forward physics, gradient agreement + hockey-stick, inversion
+tests/          io, forward physics, gradient agreement + hockey-stick, inversion, speedtest
 ```
 
 ## License

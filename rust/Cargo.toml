@@ -1,0 +1,18 @@
+[package]
+name = "fwi_rust"
+version = "0.1.0"
+edition = "2021"
+description = "Native forward + adjoint-state solver for the FWI speed investigation."
+
+[lib]
+name = "fwi_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+numpy = "0.22"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

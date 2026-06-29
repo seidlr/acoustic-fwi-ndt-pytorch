@@ -16,6 +16,10 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 notebooks = ["jupyter>=1.0", "nbconvert>=7.0", "ipykernel>=6.0"]
+# Build the native Rust solver for notebook 05 (speed investigation):
+#   uv sync --extra speedtest
+#   uv run maturin develop --release -m rust/Cargo.toml
+speedtest = ["maturin>=1.5,<2.0"]
 
 [build-system]
 requires = ["hatchling"]

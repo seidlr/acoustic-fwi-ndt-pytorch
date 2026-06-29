@@ -18,6 +18,10 @@ outputs/
 # Private PhD MATLAB source (symlink; not part of this repo)
 resources/
 
+# Rust build artifacts (the native extension is built into .venv via maturin)
+rust/target/
+*.so
+
 # Tooling indexes
 .codegraph/
 

@@ -1,0 +1,12 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "fwi-rust"
+version = "0.1.0"
+description = "Native forward + adjoint-state FWI solver (Rust/PyO3) for the speed investigation."
+requires-python = ">=3.10"
+
+[tool.maturin]
+module-name = "fwi_rust"
